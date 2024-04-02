@@ -4,6 +4,8 @@ project(f9p_relay)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
+find_package(Threads REQUIRED)
+
 include_directories(include/mavlink)
 include_directories(Drivers/src)
 
@@ -35,4 +37,5 @@ target_link_libraries(f9p_relay
         mavlink_stream
         gtest
         gtest_main
+        Threads::Threads
 )

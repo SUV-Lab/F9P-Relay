@@ -110,17 +110,20 @@ void MavlinkStream::RTCMDataUpdate(std::vector<uint8_t> message) {
 }
 
 void MavlinkStream::sendMessageToVehicle(const mavlink_gps_rtcm_data_t &msg) {
-    mavlink_message_t message;
-    mavlink_msg_gps_rtcm_data_encode(255, 1, &message, &msg);
+    mavlink_message_t wifi_message;
+    mavlink_message_t lora_message;
+    mavlink_msg_gps_rtcm_data_encode_chan(0, 15, 0, &wifi_message, &msg);
+    mavlink_msg_gps_rtcm_data_encode_chan(0, 15, 1, &lora_message, &msg);
 //    cout << "Send rtcm\n";
     if (_udpSock) {
-        sendToUDP(message);
+        sendToUDP(wifi_message);
+//        printf("send to UDP(%d)\n", wifi_message.seq);
     } else {
         cout << "=============== Failed send to UDP ===============\n";
     }
     if (_lora) {
-        sendToLora(message);
-//        cout << "Send Lora  \n";
+        sendToLora(lora_message);
+//        printf("send to LoRa(%d)\n", lora_message.seq);
     } else {
         cout << "=============== Failed send to LORA ===============\n";
     }

@@ -1,5 +1,8 @@
 #include <iostream>
 #include <atomic>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
 #include "Drivers/src/ubx.h"
 #include "Drivers/src/sbf.h"
 #include "Drivers/src/ashtech.h"
@@ -31,6 +34,13 @@ public:
 private:
     MavlinkStream* _mavlinkStream;
 
+    std::thread _sendRTCMThread;
+    std::queue<std::vector<uint8_t>> _messageQueue;
+    std::mutex _queueMutex;
+    std::condition_variable _cv;
+
+    void sendRTCM();
+
     /**
      * callback from the driver for the platform specific stuff
      */
@@ -57,4 +67,6 @@ private:
     void publishGPSPosition();
     void publishGPSSatellite();
     void gotRTCMData(uint8_t *data, size_t len);
+
+    void SendDummyRTCM();
 };

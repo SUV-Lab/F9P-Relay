@@ -73,6 +73,8 @@ void F9P::run() {
     unsigned int baudrate;
     GPSBaseStationSupport *gpsDriver = nullptr;
 
+    _sendRTCMThread = std::thread(&F9P::sendRTCM, this);
+
     while (!_requestStop) {
 
         if (gpsDriver) {
@@ -141,18 +143,31 @@ F9P::F9P(const string &device,
 }
 
 F9P::~F9P() {
-    if (_pReportSatInfo) delete (_pReportSatInfo);
-    if (_f9p) delete (_f9p);
+    _cv.notify_all();
+
+    if (_sendRTCMThread.joinable()) {
+        _sendRTCMThread.join();
+    }
+
+    if (_pReportSatInfo) {
+        delete _pReportSatInfo;
+        _pReportSatInfo = nullptr;
+    }
+
+    if (_f9p) {
+        delete _f9p;
+        _f9p = nullptr;
+    }
 }
 
 void F9P::gotRTCMData(uint8_t *data, size_t len) {
     std::vector<uint8_t> message(data, data + len);
-    if (_mavlinkStream) {
-//        printf("(%d) %02x %02x %02x %02x %02x %02x %02x %02x\n", len
-//               , message[0], message[1], message[2], message[3]
-//               , message[4], message[5], message[6], message[7]);
-        _mavlinkStream->RTCMDataUpdate(message);
+    {
+        std::lock_guard<std::mutex> lock(_queueMutex);
+        _messageQueue.push(message);
     }
+
+    _cv.notify_one();
 }
 
 int F9P::callbackEntry(GPSCallbackType type, void *data1, int data2, void *user) {
@@ -209,4 +224,34 @@ void F9P::publishGPSPosition() {
 
 void F9P::publishGPSSatellite() {
 //    printf("publishGPSSatellite\n");
+}
+
+void F9P::SendDummyRTCM() {
+    const size_t len = 150;
+    uint8_t dummyData[len];
+
+    for(size_t i = 0; i < len; ++i) {
+        dummyData[i] = static_cast<uint8_t>(i + 1);
+    }
+
+    this->gotRTCMData(dummyData, len);
+}
+
+void F9P::sendRTCM() {
+    while (!_requestStop) {
+        std::unique_lock<std::mutex> lock(_queueMutex);
+        _cv.wait(lock, [this]{ return !_messageQueue.empty() || _requestStop; });
+//        std::cout << "_messageQueue(" << _messageQueue.size() << ")\n";
+        while (!_messageQueue.empty()) {
+            auto message = _messageQueue.front();
+            _messageQueue.pop();
+            lock.unlock();
+
+            if (_mavlinkStream) {
+                _mavlinkStream->RTCMDataUpdate(message);
+            }
+
+            lock.lock();
+        }
+    }
 }
