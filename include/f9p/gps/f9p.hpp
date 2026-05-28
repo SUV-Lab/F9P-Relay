@@ -40,6 +40,7 @@ private:
     std::queue<std::vector<uint8_t>> _messageQueue;
     std::mutex _queueMutex;
     std::condition_variable _cv;
+    std::atomic_bool _stopRTCMThread{false};
 
     void sendRTCM();
 

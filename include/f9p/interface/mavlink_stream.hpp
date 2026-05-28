@@ -49,12 +49,14 @@ public:
     ~MavlinkStream();
     bool initBroadcast(const string& ip, int port);
     bool initLora(const string& device);
+    bool reconnectLora();
     void RTCMDataUpdate(const vector<uint8_t>& message);
     int sendToLora(const mavlink_message_t& msg);
     int sendToUDP(const mavlink_message_t& msg);
 
 private:
     WSerial::Serial *_lora = nullptr;
+    string _loraDevice;
     int _udpSock;
     struct sockaddr_in _sock_in{};
 

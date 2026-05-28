@@ -1,0 +1,7 @@
+# F9P-Relay fixed device symlinks.
+# F9P (u-blox GNSS) -> /dev/f9p ; LoRa (CH340 USB-serial) -> /dev/lora
+# Matches by USB vendor:product, so the symlink is correct regardless of
+# which physical USB port the device is plugged into or the ttyACM/ttyUSB
+# enumeration order. Only one F9P and one LoRa may be attached at a time.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", SYMLINK+="f9p", GROUP="dialout", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="lora", GROUP="dialout", MODE="0660"

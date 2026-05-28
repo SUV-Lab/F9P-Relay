@@ -45,6 +45,7 @@ bool MavlinkStream::initBroadcast(const string &ip, int port) {
 }
 
 bool MavlinkStream::initLora(const string &device) {
+    _loraDevice = device;
     if (_lora) { delete _lora; }
     _lora = new WSerial::Serial();
     _lora->setPortName(device);
@@ -110,7 +111,7 @@ void MavlinkStream::RTCMDataUpdate(const std::vector<uint8_t>& message) {
 }
 
 void MavlinkStream::sendMessageToVehicle(const mavlink_gps_rtcm_data_t &msg) {
-    
+
 /*    WiFi/UDP transmission - currently disabled (using LoRa only)
 //    mavlink_message_t wifi_message;
 //    mavlink_msg_gps_rtcm_data_encode_chan(0, 15, 0, &wifi_message, &msg);
@@ -124,37 +125,54 @@ void MavlinkStream::sendMessageToVehicle(const mavlink_gps_rtcm_data_t &msg) {
 */
     mavlink_message_t lora_message;
     mavlink_msg_gps_rtcm_data_encode_chan(0, 15, 1, &lora_message, &msg);
-    if (_lora) {
-        sendToLora(lora_message);
-    //    printf("send to LoRa(%d)\n", lora_message.seq);
-    } else {
-        cout << "=============== Failed send to LORA ===============\n";
-    }
+    sendToLora(lora_message);
+}
 
+bool MavlinkStream::reconnectLora() {
+    if (_lora) {
+        delete _lora;
+        _lora = nullptr;
+    }
+    _lora = new WSerial::Serial();
+    _lora->setPortName(_loraDevice);
+    _lora->setBaudRate(115200);
+    if (_lora->open()) {
+        _lora->clearError();
+        cout << "LoRa reconnected [" << _loraDevice << "]\n";
+        return true;
+    }
+    // Device not back yet; drop the handle and retry on the next send.
+    delete _lora;
+    _lora = nullptr;
+    return false;
 }
 
 int MavlinkStream::sendToLora(const mavlink_message_t &msg) {
+    // LoRa may have been unplugged; try a single non-blocking reopen.
+    // On failure the message is dropped (the RTCM queue keeps draining) and
+    // the next send retries, so it recovers automatically once replugged.
+    if (!_lora && !reconnectLora()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        return -1;
+    }
+
     uint8_t lora_buffer[LORA_PAYLOAD];
     uint8_t packet[LORA_PACKET_MAX];
-//    cout << "mavlink size : " << sizeof(msg) << "\n";
     int len = mavlink_msg_to_send_buffer(lora_buffer, &msg);
     memcpy(packet, LORA_HEADER, sizeof(LORA_HEADER));
     memcpy(packet + sizeof(LORA_HEADER), lora_buffer, len);
     int ret = _lora->write(reinterpret_cast<const char *>(packet), len + sizeof(LORA_HEADER));
-    auto now = std::chrono::system_clock::now();
 
-    auto usec = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-
-//    std::cout << "ret : " << ret << "len : "<< len <<" Current time: " << usec << "\n";
     if (ret < 0) {
-        perror("Failed to write to serial port\n");
+        perror("Failed to write to LoRa serial port");
+        reconnectLora();
     }
 
     // Delay to prevent LoRa internal buffer overflow
     // LoRa modules have limited buffer and slow transmission rate
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    return 0;
+    return ret;
 }
 
 int MavlinkStream::sendToUDP(const mavlink_message_t &msg) {

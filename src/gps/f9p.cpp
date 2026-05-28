@@ -47,6 +47,7 @@ void F9P::run() {
 
     _sendRTCMThread = std::thread(&F9P::sendRTCM, this);
 
+    int configFailures = 0;
     while (!_requestStop) {
 
         if (gpsDriver) {
@@ -67,9 +68,17 @@ void F9P::run() {
         if (gpsDriver->configure(baudrate, _gpsConfig) != 0) {
             // GPS driver configuration failed
             cout << "GPS driver configuration failed, checking serial port status...\n";
+            // If the device was unplugged, the serial fd is dead and configure() can
+            // never succeed here (this path never reopens the port). Give up after a
+            // while and exit so systemd restarts us with a clean init that reopens
+            // /dev/f9p at whatever ttyACMn it came back as.
+            if (++configFailures >= 15) {
+                throw std::runtime_error("GPS configuration kept failing; exiting for clean restart");
+            }
             std::this_thread::sleep_for(std::chrono::seconds(1));
             continue;  // Retry initialization
         }
+        configFailures = 0;
 
         /* reset report */
         memset(&_reportGpsPos, 0, sizeof(_reportGpsPos));
@@ -127,7 +136,7 @@ void F9P::run() {
             _f9p->setPortName(_device);
             _f9p->setBaudRate(115200);
 
-            int reconnectRetries = 10;
+            int reconnectRetries = 60;
             bool reconnected = false;
 
             while (reconnectRetries-- > 0 && !_requestStop) {
@@ -143,7 +152,10 @@ void F9P::run() {
 
             if (!reconnected) {
                 cout << "========= Failed to reconnect to device =========\n";
-                cout << "Will retry GPS driver initialization...\n";
+                // Give up on in-process recovery and exit so systemd restarts us
+                // with a clean init (which reopens /dev/f9p at its new tty number).
+                // Spinning here on a dead fd would loop forever without retrying open.
+                throw std::runtime_error("Failed to reconnect to F9P");
             }
             // Continue to next iteration to reinitialize GPS driver
         } else {
@@ -182,6 +194,11 @@ F9P::F9P(const string &device,
 }
 
 F9P::~F9P() {
+    // Tell sendRTCM() to exit. _requestStop is a const ref we cannot set, and it is
+    // never set by main, so without this the thread would sleep on _cv forever and
+    // join() below would deadlock — leaving the process alive and blocking the
+    // systemd restart we rely on for recovery.
+    _stopRTCMThread = true;
     _cv.notify_all();
 
     if (_sendRTCMThread.joinable()) {
@@ -299,9 +316,9 @@ void F9P::runTestMode() {
 }
 
 void F9P::sendRTCM() {
-    while (!_requestStop) {
+    while (!_requestStop && !_stopRTCMThread) {
         std::unique_lock<std::mutex> lock(_queueMutex);
-        _cv.wait(lock, [this]{ return !_messageQueue.empty() || _requestStop; });
+        _cv.wait(lock, [this]{ return !_messageQueue.empty() || _requestStop || _stopRTCMThread; });
         while (!_messageQueue.empty()) {
             // std::cout << "_messageQueue(" << _messageQueue.size() << ")\n";
             auto message = _messageQueue.front();

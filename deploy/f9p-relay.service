@@ -1,0 +1,13 @@
+[Unit]
+Description=F9P RTCM to LoRa relay
+After=multi-user.target
+
+[Service]
+Type=simple
+User=karidrone
+ExecStart=/home/karidrone/F9P-Relay/build/f9p_relay -l /dev/lora -g /dev/f9p
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
